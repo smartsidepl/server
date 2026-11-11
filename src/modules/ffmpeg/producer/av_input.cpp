@@ -65,7 +65,9 @@ Input::Input(const std::string& filename, std::shared_ptr<diagnostics::graph> gr
                 if (ret == AVERROR_EXIT) {
                     break;
                 } else if (ret == AVERROR(EAGAIN)) {
-                    boost::this_thread::yield();
+                    // Non-blocking inputs (dshow, see internal_reset) report "no packet yet" this way. Sleep instead of
+                    // spinning, and come back to the abort check above so a stalled device can still be closed.
+                    boost::this_thread::sleep_for(boost::chrono::milliseconds(1));
                     continue;
                 } else if (ret == AVERROR_EOF) {
                     eof_   = true;
@@ -155,6 +157,7 @@ void Input::internal_reset()
     CASPAR_SCOPE_EXIT { av_dict_free(&options); };
 
     static const std::set<std::wstring> PROTOCOLS_TREATED_AS_FORMATS = {L"dshow", L"v4l2", L"iec61883"};
+    bool                                nonblocking                  = false;
 
 #if LIBAVFORMAT_VERSION_MAJOR >= 59
     const AVInputFormat* input_format = nullptr;
@@ -174,6 +177,10 @@ void Input::internal_reset()
         input_format = av_find_input_format(u8(url_parts.first).c_str());
         filename_    = u8(url_parts.second);
         if (url_parts.first == L"dshow") {
+            // dshow waits for the next sample with an infinite timeout and ignores the interrupt callback. When a
+            // USB capture device stalls, av_read_frame never returns, ~Input blocks in join() and the device stays
+            // open ("Could not run graph ... device already in use") until the server is restarted.
+            nonblocking = true;
             // The dshow default of ~3 MB holds only a few 1080p MJPEG frames, so any hiccup drops frames
             // ("real-time buffer too full"). CASPARCG_DSHOW_RTBUFSIZE overrides, e.g. 64M.
             const char* rtbufsize = std::getenv("CASPARCG_DSHOW_RTBUFSIZE");
@@ -192,6 +199,9 @@ void Input::internal_reset()
     }
 
     AVFormatContext* ic             = avformat_alloc_context();
+    if (nonblocking) {
+        ic->flags |= AVFMT_FLAG_NONBLOCK;
+    }
     ic->interrupt_callback.callback = Input::interrupt_cb;
     ic->interrupt_callback.opaque   = this;
 
