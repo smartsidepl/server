@@ -131,6 +131,19 @@ struct const_frame::impl
         }
     }
 
+    // Copy of an existing frame with a new stream tag. Frames imported from a GPU texture (html producer with
+    // enable-gpu) carry no CPU image data, only `opaque_`, so they must not go through the plane count check.
+    impl(const impl& other, const void* new_tag)
+        : image_data_(other.image_data_)
+        , audio_data_(other.audio_data_)
+        , desc_(other.desc_)
+        , tag_(new_tag)
+        , geometry_(other.geometry_)
+        , opaque_(other.opaque_)
+        , texture_(other.texture_)
+    {
+    }
+
     const array<const std::uint8_t>& image_data(std::size_t index) const { return image_data_.at(index); }
 
     std::shared_ptr<core::texture> texture() { return texture_; }
@@ -183,13 +196,8 @@ const_frame                      const_frame::with_tag(const void* new_tag) cons
         return const_frame();
     }
 
-    std::vector<array<const std::uint8_t>> image_data_copy = impl_->image_data_;
-    auto new_frame = const_frame(new_tag, std::move(image_data_copy), impl_->audio_data_, impl_->desc_, impl_->texture_);
-
-    new_frame.impl_->geometry_ = impl_->geometry_;
-    if (impl_->opaque_.has_value()) {
-        new_frame.impl_->opaque_ = impl_->opaque_;
-    }
+    const_frame new_frame;
+    new_frame.impl_.reset(new impl(*impl_, new_tag));
 
     return new_frame;
 }

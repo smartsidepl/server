@@ -11,6 +11,7 @@
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/filesystem.hpp>
 
+#include <cstdlib>
 #include <set>
 
 #ifdef _MSC_VER
@@ -172,6 +173,12 @@ void Input::internal_reset()
     } else if (PROTOCOLS_TREATED_AS_FORMATS.find(url_parts.first) != PROTOCOLS_TREATED_AS_FORMATS.end()) {
         input_format = av_find_input_format(u8(url_parts.first).c_str());
         filename_    = u8(url_parts.second);
+        if (url_parts.first == L"dshow") {
+            // The dshow default of ~3 MB holds only a few 1080p MJPEG frames, so any hiccup drops frames
+            // ("real-time buffer too full"). CASPARCG_DSHOW_RTBUFSIZE overrides, e.g. 64M.
+            const char* rtbufsize = std::getenv("CASPARCG_DSHOW_RTBUFSIZE");
+            FF(av_dict_set(&options, "rtbufsize", rtbufsize && *rtbufsize ? rtbufsize : "32M", 0));
+        }
     }
 
     if (seekable_) {

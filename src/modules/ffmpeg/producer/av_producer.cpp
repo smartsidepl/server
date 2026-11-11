@@ -208,7 +208,14 @@ class Decoder
                             packet = std::move(input.front());
                             input.pop();
                         }
-                        FF(avcodec_send_packet(ctx.get(), packet.get()));
+                        // A corrupt packet (e.g. a truncated MJPEG frame from a USB capture device) must not end
+                        // the decoder thread: nothing would read the input any more and a live source freezes for good.
+                        const auto send_ret = avcodec_send_packet(ctx.get(), packet.get());
+                        if (send_ret == AVERROR_INVALIDDATA) {
+                            CASPAR_LOG(warning) << "[ffmpeg] Skipped a packet with invalid data.";
+                        } else {
+                            FF_RET(send_ret, "avcodec_send_packet");
+                        }
                     } else if (ret == AVERROR_EOF) {
                         avcodec_flush_buffers(ctx.get());
                         av_frame->pts = next_pts;
